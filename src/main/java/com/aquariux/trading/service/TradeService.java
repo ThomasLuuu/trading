@@ -1,6 +1,7 @@
 package com.aquariux.trading.service;
 
 import com.aquariux.trading.entity.*;
+import com.aquariux.trading.model.Account;
 import com.aquariux.trading.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -42,6 +43,7 @@ public class TradeService {
     /**
      * Execute a trade under a fair ReentrantLock and using a requestId for idempotency.
      * If the same requestId is seen again, the existing TradeTransaction is returned.
+     * TODO: Currently apply for 1 instance, in case multiple instances should be applied distributed lock with idempotency key
      */
     @Transactional
     public TradeTransaction executeTrade(String symbol,

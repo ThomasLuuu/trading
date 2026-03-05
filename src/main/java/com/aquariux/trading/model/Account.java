@@ -1,4 +1,4 @@
-package com.aquariux.trading.service;
+package com.aquariux.trading.model;
 
 import com.aquariux.trading.entity.User;
 import com.aquariux.trading.entity.Wallet;
