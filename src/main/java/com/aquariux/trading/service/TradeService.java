@@ -17,14 +17,13 @@ public class TradeService {
 
     private static final long DEFAULT_USER_ID = 1L;
     private static final String USDT = "USDT";
-    private static final List<String> SUPPORTED_SYMBOLS = List.of("BTCUSDT", "ETHUSDT");
-
     private final UserRepository userRepository;
     private final WalletRepository walletRepository;
     private final AggregatedPriceRepository aggregatedPriceRepository;
     private final TradeTransactionRepository tradeTransactionRepository;
     private final LedgerEntryRepository ledgerEntryRepository;
     private final TradingPairRepository tradingPairRepository;
+
     /**
      * Fair lock to ensure trade requests are processed one at a time (queued)
      * and in arrival order.
@@ -61,11 +60,11 @@ public class TradeService {
             BigDecimal pricePerUnit = resolveTradePrice(side, price);
             BigDecimal totalUsdt = quantity.multiply(pricePerUnit).setScale(8, RoundingMode.HALF_UP);
 
-            Accounts accounts = loadAccounts(normalizedSymbol);
-            applyTradeToWallets(accounts, side, quantity, totalUsdt);
+            Account account = loadAccounts(normalizedSymbol);
+            applyTradeToWallets(account, side, quantity, totalUsdt);
 
             TradeTransaction tx = new TradeTransaction(
-                    accounts.getUser(),
+                    account.user(),
                     normalizedSymbol,
                     side,
                     quantity,
@@ -75,7 +74,7 @@ public class TradeService {
             );
             tx = tradeTransactionRepository.save(tx);
 
-            createLedgerEntries(tx, accounts, side, quantity, totalUsdt);
+            createLedgerEntries(tx, account, side, quantity, totalUsdt);
 
             return tx;
         } finally {
@@ -102,7 +101,7 @@ public class TradeService {
         return side == TradeTransaction.TradeSide.BUY ? price.getBestAsk() : price.getBestBid();
     }
 
-    private Accounts loadAccounts(String symbol) {
+    private Account loadAccounts(String symbol) {
         User user = userRepository.findById(DEFAULT_USER_ID)
                 .orElseThrow(() -> new IllegalStateException("User not found"));
 
@@ -113,15 +112,15 @@ public class TradeService {
         Wallet baseWallet = walletRepository.findByUserIdAndCurrency(DEFAULT_USER_ID, baseCurrency)
                 .orElseGet(() -> walletRepository.save(new Wallet(user, baseCurrency, BigDecimal.ZERO)));
 
-        return new Accounts(user, usdtWallet, baseWallet, baseCurrency);
+        return new Account(user, usdtWallet, baseWallet, baseCurrency);
     }
 
-    private void applyTradeToWallets(Accounts accounts,
+    private void applyTradeToWallets(Account account,
                                      TradeTransaction.TradeSide side,
                                      BigDecimal quantity,
                                      BigDecimal totalUsdt) {
-        Wallet usdtWallet = accounts.getUsdtWallet();
-        Wallet baseWallet = accounts.getBaseWallet();
+        Wallet usdtWallet = account.usdtWallet();
+        Wallet baseWallet = account.baseWallet();
 
         if (side == TradeTransaction.TradeSide.BUY) {
             if (usdtWallet.getBalance().compareTo(totalUsdt) < 0) {
@@ -131,7 +130,7 @@ public class TradeService {
             baseWallet.setBalance(baseWallet.getBalance().add(quantity));
         } else {
             if (baseWallet.getBalance().compareTo(quantity) < 0) {
-                throw new IllegalStateException("Insufficient " + accounts.getBaseCurrency() + " balance");
+                throw new IllegalStateException("Insufficient " + account.baseCurrency() + " balance");
             }
             baseWallet.setBalance(baseWallet.getBalance().subtract(quantity));
             usdtWallet.setBalance(usdtWallet.getBalance().add(totalUsdt));
@@ -142,7 +141,7 @@ public class TradeService {
     }
 
     private void createLedgerEntries(TradeTransaction tx,
-                                     Accounts accounts,
+                                     Account account,
                                      TradeTransaction.TradeSide side,
                                      BigDecimal quantity,
                                      BigDecimal totalUsdt) {
@@ -150,34 +149,34 @@ public class TradeService {
 
         if (side == TradeTransaction.TradeSide.BUY) {
             LedgerEntry usdtEntry = new LedgerEntry(
-                    accounts.getUser(),
+                    account.user(),
                     USDT,
                     totalUsdt.negate(),
-                    accounts.getUsdtWallet().getBalance(),
+                    account.usdtWallet().getBalance(),
                     referenceTx
             );
             LedgerEntry baseEntry = new LedgerEntry(
-                    accounts.getUser(),
-                    accounts.getBaseCurrency(),
+                    account.user(),
+                    account.baseCurrency(),
                     quantity,
-                    accounts.getBaseWallet().getBalance(),
+                    account.baseWallet().getBalance(),
                     referenceTx
             );
             ledgerEntryRepository.save(usdtEntry);
             ledgerEntryRepository.save(baseEntry);
         } else {
             LedgerEntry baseEntry = new LedgerEntry(
-                    accounts.getUser(),
-                    accounts.getBaseCurrency(),
+                    account.user(),
+                    account.baseCurrency(),
                     quantity.negate(),
-                    accounts.getBaseWallet().getBalance(),
+                    account.baseWallet().getBalance(),
                     referenceTx
             );
             LedgerEntry usdtEntry = new LedgerEntry(
-                    accounts.getUser(),
+                    account.user(),
                     USDT,
                     totalUsdt,
-                    accounts.getUsdtWallet().getBalance(),
+                    account.usdtWallet().getBalance(),
                     referenceTx
             );
             ledgerEntryRepository.save(baseEntry);
